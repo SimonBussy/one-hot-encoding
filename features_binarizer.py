@@ -5,7 +5,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import OneHotEncoder
 
 
-# TODO: put back the method="linspace" case
+# TODO: add discrete features 
 
 
 class FeaturesBinarizer(BaseEstimator, TransformerMixin):
@@ -36,39 +36,6 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
     http://scikit-learn.org/stable/modules/preprocessing.html#preprocessing
     """
 
-    _attrinfos = {
-        "method": {
-            "writable": False
-        },
-        "n_cuts": {
-            "writable": False
-        },
-        "remove_first": {
-            "writable": False
-        },
-        "_prb": {
-            "writable": False
-        },
-        "_encoders": {
-            "writable": True
-        },
-        "bins_boundaries": {
-            "writable": False
-        },
-        "blocks_start": {
-            "writable": False
-        },
-        "blocks_length": {
-            "writable": False
-        },
-        "_columns_names": {
-            "writable": False
-        },
-        "_idx_col": {
-            "writable": False
-        }
-    }
-
     def __init__(self, method="quantile", n_cuts= 10, remove_first= True):
         self.method = method
         self.n_cuts = n_cuts
@@ -89,66 +56,44 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
         #  useful for ProxBinarsity)
         self.blocks_length = []
         self._columns_names = {}
-        self._idx_col = 0
-
-    # def _fit_linspace(self, X, y=None):
-    #     """
-    #     Compute linearly spaced cuts of each features
-    #     """
-    #     # Maximum and minimum of each feature
-    #     X_max = np.max(X, axis=0)
-    #     X_min = np.min(X, axis=0)
-    #     # compute the cuts at each feature
-    #     self.bins_ = [np.linspace(X_min[i], X_max[i], self.n_cuts)
-    # for i in range(X.shape[1])]
-    #     return self
-
-    # def _transform_linspace(self, X):
-    #     X = np.array(X)
-    #     X_new_cols = []
-    #     mask = self.mask_
-    #     tv_mask = []
-    #     for i in range(X.shape[1]):
-    #         if mask[i]:
-    #             # distance to all cuts
-    #             tmp = np.abs(X[:, i][:, None] - self.bins_[i])
-    #             # give it the label of the closest cut
-    #             bin_cols = (np.argmin(tmp, axis=1)[:, None] == np.arange(self.n_cuts))
-    #             X_new_cols.append(bin_cols.astype(np.float))
-    #             tv_mask.extend([True] * bin_cols.shape[1])
-    #         else:
-    #             X_new_cols.append(X[:, i][:, None])
-    #             tv_mask.append(False)
-    #     self.tv_mask = tv_mask
-    #     return np.concatenate(X_new_cols, axis=1)
 
     def _fit_quantile(self, X, y=None):
+        quantilized_X = pd.DataFrame()
         self._init()
         for feat_name in X:
             feat = X[feat_name]
-            _ = self._binarize(feat_name, feat, True)
+            quantalized_feat = self._quantilize(feat_name, feat, fit=True)
+            quantilized_X[feat_name] = quantalized_feat
+
+        self.enc = OneHotEncoder(sparse=True)
+        self.enc.fit(quantilized_X)
+
         return self
 
     def _transform_quantile(self, X):
-        x_new = pd.DataFrame()
-        for feat_name in X:
-            feat = X[feat_name]
-            feat = self._binarize(feat_name, feat, False)
-            x_new = pd.concat([x_new, feat], axis=1)
-        return x_new
-
-    def _fit_transform_quantile(self, X):
-        self._init()
-        x_new = pd.DataFrame()
-        for feat_name in X:
-            feat = X[feat_name]
-            feat = self._binarize(feat_name, feat, True)
-            x_new = pd.concat([x_new, feat], axis=1)
-        return x_new
-
-    def _binarize(self, feat_name, feat, fit):
+        """Apply the binarization using the features matrix
+        Parameters
+        ----------
+        X : `pd.DataFrame`, shape=(n_samples, n_features)
+            The features matrix
+        Returns
+        -------
+        output : `pd.DataFrame`
+            The binarized features matrix. The number of columns is
+            larger than n_features, smaller than n_cuts * n_features,
+            depending on the actual number of columns that have been
+            binarized
         """
-        Binarize a single feature
+        quantilized_X = pd.DataFrame()
+        for feat_name in X:
+            feat = X[feat_name]
+            quantilized_feat = self._quantilize(feat_name, feat, fit=False)
+            quantilized_X[feat_name] = quantilized_feat
+
+        return self.enc.transform(quantilized_X)
+
+    def _quantilize(self, feat_name, feat, fit=False):
+        """Binarize a single feature
         Parameters
         ----------
         feat_name : `str`
@@ -165,51 +110,11 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
             equal to ``n_cuts``, depending on the ``method`` and/or on
             the actual number of distinct quantiles for this feature
         """
-        continuous = feat_name.endswith(":continuous")
-        discrete = feat_name.endswith(":discrete")
-        idx_col = self._idx_col
-        encoders = self._encoders
+        # Compute quantiles for the feature
+        quantiles = self._get_quantiles(feat_name, feat, fit)
+        # Discretize feature
+        feat = pd.cut(feat, quantiles, labels=False)
 
-        if not continuous and not discrete:
-            idx_col += 1
-        else:
-            feat_type = ":discrete"
-            if continuous:
-                feat_type = ":continuous"
-                # Compute quantiles for the feature
-                quantiles = self._get_quantiles(feat_name, feat, fit)
-                # Discretize feature
-                feat = pd.cut(feat, quantiles, labels=False)
-
-            n_samples = feat.shape[0]
-            if fit:
-                encoder = OneHotEncoder(dtype=np.int, sparse=True)
-                # Binarize feature
-                feat = encoder.fit_transform(feat.reshape(n_samples, 1))
-                # Save the encoder
-                encoders[feat_name] = encoder
-            else:
-                encoder = encoders[feat_name]
-                feat = encoder.transform(feat.reshape(n_samples, 1))
-
-            if self.remove_first:
-                feat = feat[:, 1:]
-
-            n_cols_feat = feat.shape[1]
-
-            if continuous:
-                self.blocks_start.append(idx_col)
-                self.blocks_length.append(n_cols_feat)
-
-            idx_col += n_cols_feat
-
-            columns = self._get_columns_names(feat_name,
-                                              feat_type,
-                                              n_cols_feat,
-                                              fit)
-
-            feat = pd.DataFrame(feat, columns=columns)
-        self._idx_col = idx_col
         return feat
 
     def _get_quantiles(self, feat_name, x, fit):
@@ -272,28 +177,6 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
         """
         if self.method == 'quantile':
             return self._transform_quantile(X)
-        elif self.method == 'linspace':
-            raise ValueError("Method %s not implemented" % self.method)
-        else:
-            raise ValueError("Method %s not implemented" % self.method)
-
-    def fit_transform(self, X, y=None, **kwargs):
-        """
-        Fit and apply the binarization using the features matrix
-        Parameters
-        ----------
-        X : `pd.DataFrame`, shape=(n_samples, n_features)
-            The features matrix
-        Returns
-        -------
-        output : `pd.DataFrame`
-            The binarized features matrix. The number of columns is
-            larger than n_features, smaller than n_cuts * n_features,
-            depending on the actual number of columns that have been
-            binarized
-        """
-        if self.method == 'quantile':
-            return self._fit_transform_quantile(X)
         elif self.method == 'linspace':
             raise ValueError("Method %s not implemented" % self.method)
         else:

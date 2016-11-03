@@ -25,7 +25,8 @@ class Test(unittest.TestCase):
                            [-0.98909384,  1.36281079, 0., 0.],
                            [-0.30637613, -0.19147753, 1., 1.],
                            [0.27110903,  0.44583304, 0., 0.]])
-        columns = ['c:continuous', 'a:continuous', 'd', 'b:discrete']
+        values = values[:, :2]
+        columns = ['c:continuous', 'a:continuous']#, 'd', 'b:discrete']
         features = pd.DataFrame(values, columns=columns)
 
         # Create the FeatureBinarizer
@@ -36,7 +37,12 @@ class Test(unittest.TestCase):
         print(binarizer)
 
         # Apply it on the features matrix
-        features_bin = binarizer.fit_transform(features)
+        features_bin = binarizer.fit(features)
+        print(features_bin.transform(features))
+        print(features_bin.enc.feature_indices_)
+
+        return
+        # features_bin = binarizer.fit_transform(features)
 
         # Get the correct result
         values_res = np.array([[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
