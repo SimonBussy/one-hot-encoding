@@ -34,7 +34,7 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
     """
 
     def __init__(self, method="quantile", n_cuts=10, get_type="auto",
-                 remove_first=True):
+                 remove_first=False):
         self.method = method
         self.n_cuts = n_cuts
         self.get_type = get_type
@@ -132,11 +132,15 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
                 self.blocks_length.append(n_cols_feat)
             else:
                 n_cols_feat = len(feat.unique())
-            idx_col += n_cols_feat
+            if self.remove_first:
+                n_cols_feat -= 1
+                if continuous or fit:
+                    feat[feat > 0] -= 1
             if fit:
                 columns_names = self._get_columns_names(feat_name, feat_type,
                                                         n_cols_feat)
                 self._columns_names += columns_names
+            idx_col += n_cols_feat
         else:
             idx_col += 1
             self._columns_names.append(feat_name)
@@ -182,13 +186,10 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
             q = self.bins_boundaries[feat_name]
         return q
 
-    def _get_columns_names(self, feat_name, feat_type, n_bins):
-        if self.remove_first:
-            columns = [feat_name.replace(':' + feat_type, "") + "#" \
-                       + str(i) for i in range(1, n_bins + 1)]
-        else:
-            columns = [feat_name.replace(':' + feat_type, "") + "#" \
-                       + str(i) for i in range(n_bins)]
+    @staticmethod
+    def _get_columns_names(feat_name, feat_type, n_bins):
+        columns = [feat_name.replace(':' + feat_type, "") + "#" \
+                   + str(i) for i in range(n_bins)]
         return columns
 
     def fit(self, X, y=None):

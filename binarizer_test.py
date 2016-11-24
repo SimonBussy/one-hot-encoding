@@ -28,7 +28,7 @@ class Test(unittest.TestCase):
         columns = ['c:continuous', 'a:continuous', 'd', 'b:discrete']
         features = pd.DataFrame(values, columns=columns)
 
-        # Get the correct result
+        # Get the correct result with remove_first=False
         values_res = np.array([[0, 2, 0, 3],
                                [1, 0, 0, 2],
                                [2, 0, 1, 2],
@@ -68,6 +68,38 @@ class Test(unittest.TestCase):
                 binarizer.bins_boundaries['c:continuous'],
                 np.array([-np.inf, 0.08180209, 0.46599565, np.inf]))
 
+        # Get the correct result with remove_first=True
+        values_res = np.array([[0, 1, 0, 2],
+                               [0, 0, 0, 1],
+                               [1, 0, 1, 1],
+                               [1, 0, 1, 0],
+                               [0, 0, 0, 0],
+                               [0, 0, 0, 0],
+                               [1, 0, 1, 3],
+                               [0, 1, 0, 0],
+                               [0, 0, 1, 0],
+                               [0, 1, 0, 0]])
+        columns_res = ['c#0', 'c#1', 'a#0', 'a#1', 'd',
+                       'b#0', 'b#1', 'b#2', 'b#3']
+        enc = OneHotEncoder(sparse=True)
+        X_bin_res = enc.fit_transform(values_res)
+
+        # Create the FeatureBinarizer
+        n_cuts = 3
+        for get_type in ["auto", "column_names"]:
+            binarizer = FeaturesBinarizer(method='quantile', n_cuts=n_cuts,
+                                          get_type=get_type,
+                                          remove_first=True)
+
+            # Apply it on the features matrix
+            features1, features2 = features.copy(), features.copy()
+            features_bin = binarizer.fit(features1)
+            X_bin = features_bin.transform(features1)
+            X_bin_fit_transform = binarizer.fit_transform(features2)
+            self.assertTrue((X_bin_fit_transform != X_bin_res).nnz == 0)
+            self.assertTrue((X_bin != X_bin_res).nnz == 0)
+            np.testing.assert_equal(columns_res,
+                                    features_bin._columns_names)
         return
 
 if __name__ == "main":
