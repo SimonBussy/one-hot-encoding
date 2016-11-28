@@ -4,8 +4,6 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import OneHotEncoder
 
-# TODO: method="linspace" case
-
 
 class FeaturesBinarizer(BaseEstimator, TransformerMixin):
     """This is a scikit-learn transformer that transform an input
@@ -21,8 +19,8 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
     n_cuts : `int`, default=10
         Number of cuts
     method : "quantile" or "linspace", default="quantile"
-        * If ``"quantile"`` quantile-based cuts are used
-        * If ``"linspace"`` linearly spaced cuts are used
+        * If ``"quantile"`` quantile-based cuts are used.
+        * If ``"linspace"`` linearly spaced cuts are used.
     Attributes
     ----------
     bins_boundaries : `list`
@@ -43,7 +41,7 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
 
     def _init(self):
         # Quantile probabilities
-        self._prb = np.linspace(0, 100, self.n_cuts + 1)
+        self._prb = np.linspace(0, 100, self.n_cuts + 2)
         # OneHotEncoders for continuous and discrete features
         self.enc = OneHotEncoder(sparse=True)
         # Bins boundaries for continuous features
@@ -59,63 +57,85 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
         self._columns_names = []
         self._idx_col = 0
 
-    def _fit_quantile(self, X, y=None):
-        self._init()
-        quantilized_X = pd.DataFrame()
-        for feat_name in X:
-            feat = X[feat_name]
-            quantalized_feat = self._quantilize(feat_name, feat, fit=True)
-            quantilized_X[feat_name] = quantalized_feat
-        self.enc.fit(quantilized_X)
-        return self
-
-    def _transform_quantile(self, X):
-        """Apply the binarization using the features matrix
+    def fit(self, X, y=None):
+        """Fit the binarization using the features matrix.
         Parameters
         ----------
         X : `pd.DataFrame`, shape=(n_samples, n_features)
-            The features matrix
+            The features matrix.
+        Returns
+        -------
+        output : `FeaturesBinarizer`
+            The fitted current instance.
+        """
+        self._init()
+        binarized_X = pd.DataFrame()
+        for feat_name in X:
+            feat = X[feat_name]
+            binarized_feat = self._binarize(feat_name, feat, fit=True)
+            binarized_X[feat_name] = binarized_feat
+        self.enc.fit(binarized_X)
+        return self
+
+    def transform(self, X):
+        """Apply the binarization to the given features matrix.
+        Parameters
+        ----------
+        X : `pd.DataFrame`, shape=(n_samples, n_features)
+            The features matrix.
         Returns
         -------
         output : `pd.DataFrame`
             The binarized features matrix. The number of columns is
             larger than n_features, smaller than n_cuts * n_features,
             depending on the actual number of columns that have been
-            binarized
+            binarized.
         """
-        quantilized_X = pd.DataFrame()
+        binarized_X = pd.DataFrame()
         for feat_name in X:
             feat = X[feat_name]
-            quantilized_feat = self._quantilize(feat_name, feat, fit=False)
-            quantilized_X[feat_name] = quantilized_feat
-        return self.enc.transform(quantilized_X)
+            binarized_feat = self._binarize(feat_name, feat, fit=False)
+            binarized_X[feat_name] = binarized_feat
+        return self.enc.transform(binarized_X)
 
-    def _fit_transform_quantile(self, X):
+    def fit_transform(self, X, y=None, **kwargs):
+        """Fit and apply the binarization using the features matrix.
+        Parameters
+        ----------
+        X : `pd.DataFrame`, shape=(n_samples, n_features)
+            The features matrix.
+        Returns
+        -------
+        output : `pd.DataFrame`
+            The binarized features matrix. The number of columns is
+            larger than n_features, smaller than n_cuts * n_features,
+            depending on the actual number of columns that have been
+            binarized.
+        """
         self._init()
-        quantilized_X = pd.DataFrame()
+        binarized_X = pd.DataFrame()
         for feat_name in X:
             feat = X[feat_name]
-            quantilized_feat = self._quantilize(feat_name, feat, fit=True)
-            quantilized_X[feat_name] = quantilized_feat
-        return self.enc.fit_transform(quantilized_X)
+            binarized_feat = self._binarize(feat_name, feat, fit=True)
+            binarized_X[feat_name] = binarized_feat
+        return self.enc.fit_transform(binarized_X)
 
-    def _quantilize(self, feat_name, feat, fit=False):
-        """Binarize a single feature
+    def _binarize(self, feat_name, feat, fit=False):
+        """Binarize a single feature.
         Parameters
         ----------
         feat_name : `str`
-            The feature name
+            The feature name.
         feat : `np.array`, shape=(n_samples,)
-            The column containing the feature to be binarized
+            The column containing the feature to be binarized.
         fit : `bool`
-            If `True`, we need to fit (compute quantiles) for this
-            feature
+            If `True`, we need to fit (compute boundaries) for this feature.
         Returns
         -------
         output : `np.ndarray`, shape=(n_samples, ?)
             The binarized feature. The number of columns is smaller or
             equal to ``n_cuts``, depending on the ``method`` and/or on
-            the actual number of distinct quantiles for this feature
+            the actual number of distinct boundaries for this feature.
         """
         feat_type = self._get_feature_type(feat_name, feat, fit)
         discrete = feat_type == "discrete"
@@ -123,11 +143,11 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
         idx_col = self._idx_col
         if continuous or discrete:
             if continuous:
-                # Compute quantiles for the feature
-                quantiles = self._get_quantiles(feat_name, feat, fit)
+                # Compute bins boundaries for the feature
+                boundaries = self._get_boundaries(feat_name, feat, fit)
                 # Discretize feature
-                feat = pd.cut(feat, quantiles, labels=False)
-                n_cols_feat = len(quantiles) - 1
+                feat = pd.cut(feat, boundaries, labels=False)
+                n_cols_feat = len(boundaries) - 1
                 self.blocks_start.append(idx_col)
                 self.blocks_length.append(n_cols_feat)
             else:
@@ -148,6 +168,25 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
         return feat
 
     def _get_feature_type(self, feat_name, feat, fit=False):
+        """Get the type of a single feature.
+        Parameters
+        ----------
+        feat_name : `str`
+            The feature name.
+        feat : `np.array`, shape=(n_samples,)
+            The column containing the feature to be binarized.
+        fit : `bool`
+            If `True`, we need to fit (compute boundaries) for this feature.
+        Returns
+        -------
+        output : `str`
+            The type of the feature. If self.get_type is "column_names", columns
+            with name ending with ":continuous" means continous features,
+            columns with name ending with ":discrete" means discrete features,
+            and other features (none of the above) are left unchanged. If
+            self.get_type is "auto", an automatic type detection procedure is
+            followed.
+        """
         if fit:
             if self.get_type == "column_names":
                 if feat_name.endswith(":continuous"):
@@ -157,10 +196,13 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
                 else:
                     feat_type = ""
             elif self.get_type == "auto":
-                if len(feat) > 20:
-                    eps = 10
+                # threshold choice depending on whether one has more than 20
+                # examples or not
+                if len(feat) > 30:
+                    eps = 15
                 else:
                     eps = len(feat) / 2
+                # count distinct realizations and compare to threshold
                 if len(feat.unique()) > eps:
                     feat_type = "continuous"
                 elif len(feat.unique()) > 2:
@@ -175,80 +217,46 @@ class FeaturesBinarizer(BaseEstimator, TransformerMixin):
             feat_type = self.feature_type[feat_name]
         return feat_type
 
-    def _get_quantiles(self, feat_name, x, fit):
+    def _get_boundaries(self, feat_name, feat, fit):
+        """Get bins boundaries of a single feature.
+        Parameters
+        ----------
+        feat_name : `str`
+            The feature name.
+        feat : `np.array`, shape=(n_samples,)
+            The column containing the feature to be binarized.
+        fit : `bool`
+            If `True`, we need to fit (compute boundaries) for this feature.
+        Returns
+        -------
+        output : `np.ndarray`, shape=(?,)
+            The bins boundaries. The number of lines is smaller or
+            equal to ``n_cuts``, depending on the ``method`` and/or on
+            the actual number of distinct boundaries for this feature.
+        """
         if fit:
-            q = np.percentile(x, self._prb, interpolation="nearest")
-            q = np.unique(q)
-            q[0] = -np.inf
-            q[-1] = np.inf
-            self.bins_boundaries[feat_name] = q
+            if self.method == 'quantile':
+                boundaries = np.percentile(feat, self._prb,
+                                           interpolation="nearest")
+                # Only keep distinct bins boundaries
+                boundaries = np.unique(boundaries)
+            elif self.method == 'linspace':
+                # Maximum and minimum of the feature
+                feat_max = np.max(feat)
+                feat_min = np.min(feat)
+                # Compute the cuts
+                boundaries = np.linspace(feat_min, feat_max, self.n_cuts + 2)
+            else:
+                raise ValueError("Method %s not implemented" % self.method)
+            boundaries[0] = -np.inf
+            boundaries[-1] = np.inf
+            self.bins_boundaries[feat_name] = boundaries
         else:
-            q = self.bins_boundaries[feat_name]
-        return q
+            boundaries = self.bins_boundaries[feat_name]
+        return boundaries
 
     @staticmethod
     def _get_columns_names(feat_name, feat_type, n_bins):
         columns = [feat_name.replace(':' + feat_type, "") + "#" \
                    + str(i) for i in range(n_bins)]
         return columns
-
-    def fit(self, X, y=None):
-        """Fit the binarization using the features matrix
-        Parameters
-        ----------
-        X : `pd.DataFrame`, shape=(n_samples, n_features)
-            The features matrix
-        Returns
-        -------
-        output : `FeaturesBinarizer`
-            The fitted current instance
-        """
-        if self.method == 'quantile':
-            return self._fit_quantile(X, y)
-        elif self.method == 'linspace':
-            raise ValueError("Method %s not implemented" % self.method)
-        else:
-            raise ValueError("Method %s not implemented" % self.method)
-
-    def transform(self, X):
-        """Apply the binarization to the given features matrix
-        Parameters
-        ----------
-        X : `pd.DataFrame`, shape=(n_samples, n_features)
-            The features matrix
-        Returns
-        -------
-        output : `pd.DataFrame`
-            The binarized features matrix. The number of columns is
-            larger than n_features, smaller than n_cuts * n_features,
-            depending on the actual number of columns that have been
-            binarized
-        """
-        if self.method == 'quantile':
-            return self._transform_quantile(X)
-        elif self.method == 'linspace':
-            raise ValueError("Method %s not implemented" % self.method)
-        else:
-            raise ValueError("Method %s not implemented" % self.method)
-
-    def fit_transform(self, X, y=None, **kwargs):
-        """
-        Fit and apply the binarization using the features matrix
-        Parameters
-        ----------
-        X : `pd.DataFrame`, shape=(n_samples, n_features)
-            The features matrix
-        Returns
-        -------
-        output : `pd.DataFrame`
-            The binarized features matrix. The number of columns is
-            larger than n_features, smaller than n_cuts * n_features,
-            depending on the actual number of columns that have been
-            binarized
-        """
-        if self.method == 'quantile':
-            return self._fit_transform_quantile(X)
-        elif self.method == 'linspace':
-            raise ValueError("Method %s not implemented" % self.method)
-        else:
-            raise ValueError("Method %s not implemented" % self.method)
